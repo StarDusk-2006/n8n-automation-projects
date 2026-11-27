@@ -1,0 +1,640 @@
+{
+  "name": "Customer Feedback Automation",
+  "nodes": [
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "={{ $json.feedback }}",
+        "options": {
+          "systemMessage": "You are a professional customer feedback analysis agent.\n\nYour task is to analyze customer feedback and determine its sentiment.\n\nAnalyze the feedback based on:\n1. Customer satisfaction.\n2. Positive or negative experiences.\n3. Complaints and suggestions.\n4. Overall tone and emotional context.\n\nCLASSIFICATION RULES:\n\nAssign a sentiment score between -100 and +100.\n\n- Good: Scores from +20 to +100.\n- Neutral: Scores from -19 to +19.\n- Bad: Scores from -100 to -20.\n\nScoring guidelines:\n- +80 to +100: Extremely positive feedback.\n- +50 to +79: Strongly positive feedback.\n- +20 to +49: Mildly positive feedback.\n- -19 to +19: Neutral or mixed feedback.\n- -20 to -49: Mildly negative feedback.\n- -50 to -79: Strongly negative feedback.\n- -80 to -100: Extremely negative feedback.\n\nIMPORTANT:\n- Do not classify feedback based on individual positive or negative words alone.\n- Consider the overall meaning and context.\n- Sarcasm and indirect complaints should be considered.\n- If feedback contains both positive and negative aspects, evaluate the overall experience.\n- Do not assume that a suggestion automatically means dissatisfaction.\n\nAlso calculate a confidence score between 0 and 100, representing how confident you are in your classification.\n\nOUTPUT REQUIREMENTS:\n\nReturn ONLY a valid JSON object.\nDo not include markdown formatting, explanations outside the JSON, or code blocks.\n\nUse exactly this structure:\n\n{\n  \"sentiment\": \"<Good | Neutral | Bad>\",\n  \"sentiment_score\": <integer from -100 to 100>,\n  \"confidence\": <integer from 0 to 100>,\n  \"reason\": \"<one short sentence explaining the classification>\"\n}"
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 3.1,
+      "position": [
+        432,
+        0
+      ],
+      "id": "03a438ba-98aa-4a2d-9259-e77e382341d5",
+      "name": "AI Agent1",
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000
+    },
+    {
+      "parameters": {
+        "model": "openai/gpt-oss-120b",
+        "options": {
+          "temperature": 0
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatGroq",
+      "typeVersion": 1,
+      "position": [
+        432,
+        176
+      ],
+      "id": "71bfeb1a-52fe-4a09-a0a4-68a5bba00c97",
+      "name": "Groq Chat Model1"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Get AI Agent response\nconst response = $input.first().json.output;\n\nif (typeof response !== \"string\" || !response.trim()) {\n    throw new Error(\"AI response is empty or not text\");\n}\n\n// Extract the JSON object even if the model adds extra text or code fences\nconst start = response.indexOf(\"{\");\nconst end = response.lastIndexOf(\"}\");\n\nif (start === -1 || end <= start) {\n    throw new Error(\"No JSON object found in AI response: \" + response.slice(0, 200));\n}\n\nlet analysis;\ntry {\n    analysis = JSON.parse(response.slice(start, end + 1));\n} catch (error) {\n    throw new Error(\"Failed to parse AI response: \" + error.message);\n}\n\n// Validate sentiment score (must exist, be numeric, and be in range)\nif (analysis.sentiment_score === null || analysis.sentiment_score === undefined || analysis.sentiment_score === \"\") {\n    throw new Error(\"Missing sentiment score\");\n}\nconst score = Number(analysis.sentiment_score);\n\nif (!Number.isFinite(score) || score < -100 || score > 100) {\n    throw new Error(\"Invalid sentiment score: \" + analysis.sentiment_score);\n}\n\n// Validate confidence\nconst confidence = Number(analysis.confidence);\nif (!Number.isFinite(confidence) || confidence < 0 || confidence > 100) {\n    throw new Error(\"Invalid confidence: \" + analysis.confidence);\n}\n\n// Determine sentiment using numerical thresholds\nlet sentiment;\n\nif (score >= 20) {\n    sentiment = \"Good\";\n} else if (score <= -20) {\n    sentiment = \"Bad\";\n} else {\n    sentiment = \"Neutral\";\n}\n\nreturn [\n    {\n        json: {\n            sentiment,\n            sentiment_score: score,\n            confidence,\n            reason: String(analysis.reason ?? \"\")\n        }\n    }\n];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        768,
+        0
+      ],
+      "id": "eda3b740-3be5-4580-9430-2886eedac72e",
+      "name": "Code in JavaScript"
+    },
+    {
+      "parameters": {
+        "mode": "combine",
+        "combineBy": "combineByPosition",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3.2,
+      "position": [
+        944,
+        272
+      ],
+      "id": "feac6560-f5b6-4bbf-b556-12a7f87cd4f2",
+      "name": "Merge"
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "YOUR_GOOGLE_SHEET_ID",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "Sheet1",
+          "mode": "name"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "name": "={{ $('Feedback :)').item.json.name }}",
+            "phone": "={{ $('Feedback :)').item.json.phone }}",
+            "email": "={{ $('Feedback :)').item.json.email }}",
+            "feedback": "={{ $('Feedback :)').item.json.feedback }}",
+            "sentiment": "={{ $('Code in JavaScript').item.json.sentiment }}",
+            "reason": "={{ $('Code in JavaScript').item.json.reason }}",
+            "sentiment score": "={{ $('Code in JavaScript').item.json.sentiment_score }}",
+            "confidence": "={{ $('Code in JavaScript').item.json.confidence }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "name",
+              "displayName": "name",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "phone",
+              "displayName": "phone",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "email",
+              "displayName": "email",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "feedback",
+              "displayName": "feedback",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "sentiment",
+              "displayName": "sentiment",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "sentiment score",
+              "displayName": "sentiment score",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "confidence",
+              "displayName": "confidence",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "reason",
+              "displayName": "reason",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        1168,
+        272
+      ],
+      "id": "3c85997f-e15e-4d97-8ffd-a8620cf8c8c7",
+      "name": "Append row in sheet",
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 4
+                },
+                "conditions": [
+                  {
+                    "id": "c5636253-66ec-43b6-918c-c34ce70cdfb0",
+                    "leftValue": "={{ $('Code in JavaScript').item.json.sentiment }}",
+                    "rightValue": "Good",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "Good"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 4
+                },
+                "conditions": [
+                  {
+                    "id": "20342ca0-9cec-4718-8a8c-6cf238fcae18",
+                    "leftValue": "={{ $('Code in JavaScript').item.json.sentiment }}",
+                    "rightValue": "Bad",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "Bad"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 4
+                },
+                "conditions": [
+                  {
+                    "id": "5d5439b8-7fc8-42ac-b208-7895b507f7cc",
+                    "leftValue": "={{ $('Code in JavaScript').item.json.sentiment }}",
+                    "rightValue": "Neutral",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "Neutral"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.5,
+      "position": [
+        1392,
+        256
+      ],
+      "id": "ac7e6a7a-f4a7-4037-a596-508dc9cf2e32",
+      "name": "Switch"
+    },
+    {
+      "parameters": {
+        "sendTo": "={{ $('Feedback :)').item.json.email }}",
+        "subject": "Thank you for your feedback",
+        "message": "=<!DOCTYPE html> <html> <head> <style>     body {         font-family: Arial, sans-serif;         background-color: #f4f6f8;         margin: 0;         padding: 30px;     }      .container {         max-width: 600px;         margin: auto;         background: #ffffff;         border-radius: 12px;         overflow: hidden;     }      .header {         background: #16a34a;         color: white;         padding: 35px 20px;         text-align: center;     }      .content {         padding: 30px;         color: #333;         line-height: 1.7;     }      .badge {         background: #dcfce7;         color: #166534;         padding: 12px;         border-radius: 8px;         text-align: center;         margin: 20px 0;     }      .feedback {         background: #f9fafb;         padding: 15px;         border-left: 4px solid #16a34a;         margin: 20px 0;     }      .footer {         background: #f9fafb;         padding: 20px;         text-align: center;         color: #888;         font-size: 12px;     } </style> </head>  <body>  <div class=\"container\">      <div class=\"header\">         <h1>Thank You! 🎉</h1>         <p>We're glad you enjoyed your experience!</p>     </div>      <div class=\"content\">          <h2>Hello {{ $('Feedback :)').item.json.name || 'Valued Customer' }},</h2>          <p>             We truly appreciate you taking the time to share your experience             with us. Your satisfaction means everything to our team!         </p>          <div class=\"badge\">             <h3>Positive Feedback</h3>             <strong>Sentiment Score: {{ $('Code in JavaScript').item.json.sentiment_score }} (scale: -100 to +100)</strong>         </div>          <h3>Your Feedback:</h3>          <div class=\"feedback\">            {{ String($('Feedback :)').item.json.feedback).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;') }}          </div>          <p>             Your kind words motivate us to keep delivering the best possible             service. We look forward to seeing you again!         </p>          <p>             Best Regards,<br>             <strong>Customer Support Team</strong>         </p>      </div>      <div class=\"footer\">         This is an automated response to your submitted feedback.<br>         © 2026 Your Company. All Rights Reserved.     </div>  </div>  </body> </html>",
+        "options": {
+          "appendAttribution": false
+        }
+      },
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.2,
+      "position": [
+        1744,
+        64
+      ],
+      "id": "340b8153-4939-4985-b229-8c4f4ffc04d7",
+      "name": "GOOD"
+    },
+    {
+      "parameters": {
+        "sendTo": "={{ $('Feedback :)').item.json.email }}",
+        "subject": "We're sorry about your experience",
+        "message": "=<!DOCTYPE html> <html> <head> <style>     body {         font-family: Arial, sans-serif;         background-color: #f4f6f8;         margin: 0;         padding: 30px;     }      .container {         max-width: 600px;         margin: auto;         background: #ffffff;         border-radius: 12px;         overflow: hidden;     }      .header {         background: #dc2626;         color: white;         padding: 35px 20px;         text-align: center;     }      .content {         padding: 30px;         color: #333;         line-height: 1.7;     }      .badge {         background: #fee2e2;         color: #991b1b;         padding: 12px;         border-radius: 8px;         text-align: center;         margin: 20px 0;     }      .feedback {         background: #f9fafb;         padding: 15px;         border-left: 4px solid #dc2626;         margin: 20px 0;     }      .footer {         background: #f9fafb;         padding: 20px;         text-align: center;         color: #888;         font-size: 12px;     } </style> </head>  <body>  <div class=\"container\">      <div class=\"header\">         <h1>We're Sorry!</h1>         <p>Your experience matters to us.</p>     </div>      <div class=\"content\">          <h2>Hello {{ $('Feedback :)').item.json.name || 'Valued Customer' }},</h2>          <p>             We're sorry to hear that your experience did not meet             your expectations. We sincerely appreciate you bringing             this to our attention.         </p>          <h3>Your Feedback:</h3>          <div class=\"feedback\">             {{ String($('Feedback :)').item.json.feedback).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;') }}         </div>          <p>             We take your concerns seriously and will use your feedback             to identify areas that need improvement. Your experience             helps us become better.         </p>          <p>             Thank you for giving us the opportunity to improve.         </p>          <p>             Best Regards,<br>             <strong>Customer Support Team</strong>         </p>      </div>      <div class=\"footer\">         This is an automated response to your submitted feedback.<br>         © 2026 Your Company. All Rights Reserved.     </div>  </div>  </body> </html>",
+        "options": {
+          "appendAttribution": false
+        }
+      },
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.2,
+      "position": [
+        1744,
+        272
+      ],
+      "id": "32dce91a-1b19-470d-bfc3-d7713a95a505",
+      "name": "BAD"
+    },
+    {
+      "parameters": {
+        "sendTo": "={{ $('Feedback :)').item.json.email }}",
+        "subject": "Thanks for sharing your feedback",
+        "message": "=<!DOCTYPE html> <html> <head> <style>     body {         font-family: Arial, sans-serif;         background-color: #f4f6f8;         margin: 0;         padding: 30px;     }      .container {         max-width: 600px;         margin: auto;         background: #ffffff;         border-radius: 12px;         overflow: hidden;     }      .header {         background: #2563eb;         color: white;         padding: 35px 20px;         text-align: center;     }      .content {         padding: 30px;         color: #333;         line-height: 1.7;     }      .badge {         background: #dbeafe;         color: #1e40af;         padding: 12px;         border-radius: 8px;         text-align: center;         margin: 20px 0;     }      .feedback {         background: #f9fafb;         padding: 15px;         border-left: 4px solid #2563eb;         margin: 20px 0;     }      .footer {         background: #f9fafb;         padding: 20px;         text-align: center;         color: #888;         font-size: 12px;     } </style> </head>  <body>  <div class=\"container\">      <div class=\"header\">         <h1>We Appreciate Your Feedback!</h1>         <p>Every opinion helps us improve.</p>     </div>      <div class=\"content\">          <h2>Hello {{ $('Feedback :)').item.json.name || 'Valued Customer' }},</h2>          <p>             Thank you for taking the time to share your thoughts with us.             We appreciate your honesty and the opportunity to understand             your experience better.         </p>          <div class=\"badge\">             <h3>Neutral Feedback</h3>             <strong>Sentiment Score: {{ $('Code in JavaScript').item.json.sentiment_score }} (scale: -100 to +100)</strong>         </div>          <h3>Your Feedback:</h3>          <div class=\"feedback\">             {{ String($('Feedback :)').item.json.feedback).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;') }}         </div>          <p>             We continuously strive to improve our services, and your             input plays an important role in helping us achieve that.         </p>          <p>             If you have any additional suggestions or thoughts,             we'd love to hear them!         </p>          <p>             Best Regards,<br>             <strong>Customer Support Team</strong>         </p>      </div>      <div class=\"footer\">         This is an automated response to your submitted feedback.<br>         © 2026 Your Company. All Rights Reserved.     </div>  </div>  </body> </html>",
+        "options": {
+          "appendAttribution": false
+        }
+      },
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.2,
+      "position": [
+        1744,
+        480
+      ],
+      "id": "64dc3733-44ba-4bad-880e-1d1f0e5168ef",
+      "name": "NEUTRAL"
+    },
+    {
+      "parameters": {
+        "formTitle": "User feedback",
+        "formDescription": "Enter your feedback",
+        "formFields": {
+          "values": [
+            {
+              "fieldLabel": "name",
+              "requiredField": true
+            },
+            {
+              "fieldLabel": "phone"
+            },
+            {
+              "fieldLabel": "email",
+              "fieldType": "email",
+              "requiredField": true
+            },
+            {
+              "fieldLabel": "feedback",
+              "fieldType": "textarea",
+              "requiredField": true
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.formTrigger",
+      "typeVersion": 2.6,
+      "position": [
+        0,
+        288
+      ],
+      "id": "17c54aeb-1fa3-4405-bb1f-ccdf7c864349",
+      "name": "Feedback :)"
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "YOUR_GOOGLE_SHEET_ID",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "Sheet1",
+          "mode": "name"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "Name": "={{ $('Feedback :)').item.json.name }}",
+            "Phone": "={{ $('Feedback :)').item.json.phone }}",
+            "Email": "={{ $('Feedback :)').item.json.email }}",
+            "Action/Reason": "={{ $('Code in JavaScript').item.json.reason }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "Name",
+              "displayName": "Name",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Phone",
+              "displayName": "Phone",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Email",
+              "displayName": "Email",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Action/Reason",
+              "displayName": "Action/Reason",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        1968,
+        272
+      ],
+      "id": "d3ab34b4-1ab3-4afc-bc8b-674333ccbd7a",
+      "name": "Bad Feedbacks"
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "YOUR_GOOGLE_SHEET_ID",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "Sheet1",
+          "mode": "name"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "Name": "={{ $('Feedback :)').item.json.name }}",
+            "Phone": "={{ $('Feedback :)').item.json.phone }}",
+            "Email": "={{ $('Feedback :)').item.json.email }}",
+            "Action/Reason": "={{ $('Code in JavaScript').item.json.reason }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "Name",
+              "displayName": "Name",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Phone",
+              "displayName": "Phone",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Email",
+              "displayName": "Email",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Action/Reason",
+              "displayName": "Action/Reason",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        1968,
+        480
+      ],
+      "id": "606cd887-ad63-4da4-8e2b-5dc12888bd6e",
+      "name": "Neutral Feedbacks"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Groq Chat Model1": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "AI Agent1",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI Agent1": {
+      "main": [
+        [
+          {
+            "node": "Code in JavaScript",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code in JavaScript": {
+      "main": [
+        [
+          {
+            "node": "Merge",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Merge": {
+      "main": [
+        [
+          {
+            "node": "Append row in sheet",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Append row in sheet": {
+      "main": [
+        [
+          {
+            "node": "Switch",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Switch": {
+      "main": [
+        [
+          {
+            "node": "GOOD",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "BAD",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "NEUTRAL",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "BAD": {
+      "main": [
+        [
+          {
+            "node": "Bad Feedbacks",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "NEUTRAL": {
+      "main": [
+        [
+          {
+            "node": "Neutral Feedbacks",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Feedback :)": {
+      "main": [
+        [
+          {
+            "node": "AI Agent1",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Merge",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  },
+  "meta": {},
+  "nodeGroups": [],
+  "tags": []
+}

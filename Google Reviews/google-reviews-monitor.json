@@ -1,0 +1,403 @@
+{
+  "name": "Google Reviews Monitor",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {}
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.4,
+      "position": [
+        0,
+        0
+      ],
+      "id": "179c4ba9-5d0c-45fb-8d8b-7c886ee3e8ae",
+      "name": "Schedule Trigger"
+    },
+    {
+      "parameters": {
+        "operation": "Run actor and get dataset",
+        "actorId": {
+          "__rl": true,
+          "value": "gT99sk2Z5BOn6jD7M",
+          "mode": "list",
+          "cachedResultName": "Google Reviews Scraper (datablow/google-reviews-scraper)",
+          "cachedResultUrl": "https://console.apify.com/actors/gT99sk2Z5BOn6jD7M/input"
+        },
+        "customBody": "{\n  \"locationUrls\": [\n    \"https://www.google.com/maps/place/Breadfast+Coffee/@29.9815099,31.3164224,17z/data=!4m8!3m7!1s0x14583980776f3601:0x87c890ebca584ec8!8m2!3d29.9815099!4d31.3164224!9m1!1b1!16s%2Fg%2F11y57c_z5f?authuser=0&hl=en\"\n  ],\n  \"maxReviews\": 5,\n  \"language\": \"en\"\n}",
+        "memory": 4096
+      },
+      "type": "@apify/n8n-nodes-apify.apify",
+      "typeVersion": 2,
+      "position": [
+        224,
+        0
+      ],
+      "id": "437d74f4-5053-4038-b3ab-fd5256b6878d",
+      "name": "Run an Actor and get dataset"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "50a04066-6a63-4a95-b84a-79b1838dba5b",
+              "name": "placeName",
+              "value": "={{ $json.placeName }}",
+              "type": "string"
+            },
+            {
+              "id": "46a5df1a-b012-4187-a333-9f8557a45848",
+              "name": "PlaceAddress",
+              "value": "={{ $json.placeAddress }}",
+              "type": "string"
+            },
+            {
+              "id": "7fec7c3f-78ad-49ec-8fb7-0f005a948af0",
+              "name": "reviewerName",
+              "value": "={{ $json.reviewerName }}",
+              "type": "string"
+            },
+            {
+              "id": "554a3289-eedd-4984-844b-45ff707c6959",
+              "name": "rating",
+              "value": "={{ $json.rating }}",
+              "type": "number"
+            },
+            {
+              "id": "a1dd5853-e15b-4fe5-b695-0fa0c80ddef9",
+              "name": "reviewText",
+              "value": "={{ $json.reviewText }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.5,
+      "position": [
+        448,
+        0
+      ],
+      "id": "a3492d0c-c955-41ab-8b08-5f4a7d937113",
+      "name": "Edit Fields"
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=Place: {{ $json.placeName }}\nReviewer: {{ $json.reviewerName }}\nRating: {{ $json.rating }}\nReview: {{ $json.reviewText }}",
+        "messages": {
+          "messageValues": [
+            {
+              "message": "=You are a customer review analyzer. Return ONLY valid JSON, no extra text, with exactly these fields:\n- review_rating: positive | negative | neutral\n- action: thank_customer | investigate_complaint | improve_service | respond_to_feedback\n- priority: high | medium | low\n\nPriority rules: high = rating 1-2 or serious complaints (hygiene, safety, rudeness); medium = rating 3 or moderate complaints; low = rating 4-5 without serious issues.\nDo not invent information or assume problems that are not mentioned.\nIMPORTANT: the star rating has the strongest influence on review_rating."
+            }
+          ]
+        },
+        "batching": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.chainLlm",
+      "typeVersion": 1.9,
+      "position": [
+        672,
+        0
+      ],
+      "id": "ebadc1dd-def5-4e5b-a426-0c49b1a3a894",
+      "name": "Basic LLM Chain"
+    },
+    {
+      "parameters": {
+        "model": "openai/gpt-oss-120b",
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenRouter",
+      "typeVersion": 1,
+      "position": [
+        608,
+        208
+      ],
+      "id": "3f4387b7-daca-45a2-bdec-ff79358774fc",
+      "name": "OpenRouter Chat Model"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Parse the AI's JSON reply. If it is malformed, fall back to rules based on the star rating.\nconst fallbackFromRating = (rating) => {\n  const r = Number(rating);\n  if (!Number.isFinite(r)) return { review_rating: 'neutral', action: 'respond_to_feedback', priority: 'medium' };\n  if (r <= 2) return { review_rating: 'negative', action: 'investigate_complaint', priority: 'high' };\n  if (r === 3) return { review_rating: 'neutral', action: 'respond_to_feedback', priority: 'medium' };\n  return { review_rating: 'positive', action: 'thank_customer', priority: 'low' };\n};\n\nreturn $input.all().map((item, i) => {\n  const src = $('Edit Fields').itemMatching(i).json;\n  let ai;\n  try {\n    const raw = String(item.json.text ?? '');\n    const start = raw.indexOf('{');\n    const end = raw.lastIndexOf('}');\n    ai = JSON.parse(raw.slice(start, end + 1));\n  } catch (e) {\n    ai = fallbackFromRating(src.rating);\n  }\n  return { json: { ...src, ...ai } };\n});\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        992,
+        0
+      ],
+      "id": "dd2ecff3-3d73-49fc-9d5a-bcd6b2b13ec5",
+      "name": "Code in JavaScript"
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "YOUR_GOOGLE_SHEET_ID",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "Sheet1",
+          "mode": "name"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "placename": "={{ $json.placeName }}",
+            "placeaddress": "={{ $json.PlaceAddress }}",
+            "reviewname": "={{ $json.reviewerName }}",
+            "rating": "={{ $json.rating }}",
+            "reviewtext": "={{ $json.reviewText }}",
+            "reviewrating": "={{ $json.review_rating }}",
+            "action": "={{ $json.action }}",
+            "priority": "={{ $json.priority }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "placename",
+              "displayName": "placename",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "placeaddress",
+              "displayName": "placeaddress",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "reviewname",
+              "displayName": "reviewname",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "rating",
+              "displayName": "rating",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "reviewtext",
+              "displayName": "reviewtext",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "reviewrating",
+              "displayName": "reviewrating",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "priority",
+              "displayName": "priority",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "action",
+              "displayName": "action",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        1216,
+        0
+      ],
+      "id": "e51a6e76-0cca-446b-8c1c-7bc71af57c61",
+      "name": "Append row in sheet"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 4
+          },
+          "conditions": [
+            {
+              "id": "909488e5-bd23-4585-9704-9957eec0f900",
+              "leftValue": "={{ $json.priority }}",
+              "rightValue": "high",
+              "operator": {
+                "type": "string",
+                "operation": "equals",
+                "name": "filter.operator.equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.4,
+      "position": [
+        1440,
+        0
+      ],
+      "id": "2dbb247f-bb08-4c77-945b-189196d37671",
+      "name": "High priority?"
+    },
+    {
+      "parameters": {
+        "sendTo": "YOUR_EMAIL@example.com",
+        "subject": "Review",
+        "message": "=High-priority review at {{ $('Code in JavaScript').item.json.placeName }}( {{ $('Code in JavaScript').item.json.rating }}stars): {{ $('Code in JavaScript').item.json.reviewText }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.2,
+      "position": [
+        1680,
+        -96
+      ],
+      "id": "2dcd34b6-81d1-4abe-9ace-c2adbe6c5f77",
+      "name": "Email alert"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Schedule Trigger": {
+      "main": [
+        [
+          {
+            "node": "Run an Actor and get dataset",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Run an Actor and get dataset": {
+      "main": [
+        [
+          {
+            "node": "Edit Fields",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Edit Fields": {
+      "main": [
+        [
+          {
+            "node": "Basic LLM Chain",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "OpenRouter Chat Model": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Basic LLM Chain",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Basic LLM Chain": {
+      "main": [
+        [
+          {
+            "node": "Code in JavaScript",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code in JavaScript": {
+      "main": [
+        [
+          {
+            "node": "Append row in sheet",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Append row in sheet": {
+      "main": [
+        [
+          {
+            "node": "High priority?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "High priority?": {
+      "main": [
+        [
+          {
+            "node": "Email alert",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  },
+  "meta": {},
+  "nodeGroups": [],
+  "tags": []
+}

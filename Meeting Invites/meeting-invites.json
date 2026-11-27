@@ -1,0 +1,284 @@
+{
+  "name": "Meeting Invites to Departments",
+  "nodes": [
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        0,
+        0
+      ],
+      "id": "91178c46-97f9-4eab-b901-13435a69c10f",
+      "name": "When clicking ‘Execute workflow’"
+    },
+    {
+      "parameters": {
+        "operation": "sendAndWait",
+        "sendTo": "YOUR_EMAIL@example.com",
+        "subject": "Meetings",
+        "message": "Add the meetings you'll need to cover.",
+        "responseType": "freeText",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.2,
+      "position": [
+        224,
+        0
+      ],
+      "id": "803e032a-f617-4ba8-b1c6-822acdb6351f",
+      "name": "Send message and wait for response"
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "={{ $json.data.text }}",
+        "messages": {
+          "messageValues": [
+            {
+              "message": "=You are an AI Information Extraction Assistant.  Your task is to analyze the input text and extract meeting details into a structured JSON object.  Rules: 1. Extract only the information explicitly mentioned in the text. 2. Do not infer or invent missing information. 3. Return ONLY valid JSON. 4. If a field is not found, return an empty string \"\". 5. If multiple teams are mentioned, return them as an array. 6. Normalize the meeting time exactly as written (e.g., \"7:00 PM\"). 7. Do not include explanations or Markdown. 8. The response must start with { and end with }.  Return this JSON schema:  {   \"meeting_time\": \"\",   \"meeting_date\": \"\",   \"teams\": [],   \"title\": \"\",   \"message\": \"\" }  Example Input:  Hi Team,  This is a reminder that today's meeting will be held at 7:00 PM. The meeting will be attended by representatives from the Sales, Marketing, HR, Finance, PR, and Commercial teams.  Looking forward to seeing everyone on time. Thank you!  Example Output:  {   \"meeting_time\": \"7:00 PM\",   \"meeting_date\": \"Today\",   \"teams\": [     \"Sales\",     \"Marketing\",     \"HR\",     \"Finance\",     \"PR\",     \"Commercial\"   ],   \"title\": \"Meeting Reminder\",   \"message\": \"This is a reminder that today's meeting will be held at 7:00 PM.\" }  The input text will be provided below. Extract the information and return ONLY the JSON object.\n\n"
+            }
+          ]
+        },
+        "batching": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.chainLlm",
+      "typeVersion": 1.9,
+      "position": [
+        448,
+        0
+      ],
+      "id": "36bd0c38-d401-45fb-a708-5b5fd01ab819",
+      "name": "Basic LLM Chain"
+    },
+    {
+      "parameters": {
+        "model": "openai/gpt-oss-120b",
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatGroq",
+      "typeVersion": 1,
+      "position": [
+        384,
+        208
+      ],
+      "id": "f06fbcbf-ff48-4046-a608-8e7241b7ffef",
+      "name": "Groq Chat Model"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Extract the JSON object from the AI reply (it may add extra text or code fences).\nconst raw = String($input.first().json.text ?? '');\nconst start = raw.indexOf('{');\nconst end = raw.lastIndexOf('}');\nif (start === -1 || end <= start) {\n  throw new Error('No JSON found in AI response: ' + raw.slice(0, 200));\n}\n\nlet meeting;\ntry {\n  meeting = JSON.parse(raw.slice(start, end + 1));\n} catch (e) {\n  throw new Error('Could not parse meeting JSON: ' + e.message + ' | ' + raw.slice(0, 200));\n}\n\nconst teams = Array.isArray(meeting.teams)\n  ? meeting.teams.map(t => String(t).trim()).filter(Boolean)\n  : [];\n\nreturn [\n  {\n    json: {\n      meeting_time: meeting.meeting_time || '',\n      meeting_date: meeting.meeting_date || '',\n      title: meeting.title || '',\n      message: meeting.message || '',\n      total_teams: teams.length,\n      teams\n    }\n  }\n];\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        800,
+        -16
+      ],
+      "id": "395dfe49-f2ee-4929-b463-f3fc90294fe1",
+      "name": "Code in JavaScript"
+    },
+    {
+      "parameters": {
+        "project": {
+          "__rl": true,
+          "value": "YOUR_TODOIST_PROJECT_ID",
+          "mode": "id"
+        },
+        "content": "={{ $json.output }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.todoist",
+      "typeVersion": 2.2,
+      "position": [
+        1472,
+        -80
+      ],
+      "id": "3195e256-90bd-45d0-9277-efd06fdbb92a",
+      "name": "Create a task"
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=\nYou are an AI Meeting Notification Assistant.\n\nYour task is to send meeting invitations only to the departments listed in the input JSON.\n\nWorkflow:\n\n1. Receive the meeting information in JSON format.\n2. Read the \"teams\" array.\n3. Search the connected Google Sheet for each department name.\n4. Match the department name with the corresponding email address.\n5. If a department does not exist in the Google Sheet, skip it and continue with the remaining departments.\n6. Collect all valid email addresses.\n7. Generate a professional meeting invitation email.\n8. Send the email to every matched department using the Email/Gmail node.\n9. Return a summary of the emails that were sent.\n\nGoogle Sheet Structure:\n\n- Department\n- Email\n\nExample:\n\nDepartment | Email\nSales | YOUR_EMAIL@example.com\nMarketing | YOUR_EMAIL@example.com\nHR | YOUR_EMAIL@example.com\nFinance | YOUR_EMAIL@example.com\nPR | YOUR_EMAIL@example.com\nCommercial | YOUR_EMAIL@example.com\n\nInput JSON Example:\n\n{\n  \"meeting_time\": \"7:00 PM\",\n  \"meeting_date\": \"Today\",\n  \"title\": \"Meeting Reminder\",\n  \"message\": \"This is a reminder that today's meeting will be held at 7:00 PM.\",\n  \"total_teams\": 6,\n  \"teams\": [\n    \"Sales\",\n    \"Marketing\",\n    \"HR\",\n    \"Finance\",\n    \"PR\",\n    \"Commercial\"\n  ]\n}\n\nEmail Subject:\nMeeting Reminder – Today at {{ $json.meeting_time }}\n\nEmail Body:\n\nDear Team,\n\nThis is a reminder that today's meeting will be held at {{ $json.meeting_time }}.\n\nDepartments attending:\n{{ $json.teams.join(', ') }}\n\nWe look forward to your attendance.\n\nBest regards,\nManagement\n\nRules:\n- Only use email addresses found in the Google Sheet.\n- Match department names case-insensitively.\n- Do not invent email addresses.\n- Skip departments that have no matching email.\n- Send one email to each matched department.\n- After sending all emails, return a short plain-text summary (no JSON): which departments were emailed and which were skipped.\n\nhere's the message from the JSON:\n{{ $json.message }}\n",
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 3.1,
+      "position": [
+        1056,
+        -80
+      ],
+      "id": "cc03ef9c-1f34-48bf-8812-5eaec4f44433",
+      "name": "AI Agent"
+    },
+    {
+      "parameters": {
+        "model": "openai/gpt-oss-120b",
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatGroq",
+      "typeVersion": 1,
+      "position": [
+        928,
+        256
+      ],
+      "id": "a945f847-856d-4bb8-96b9-90d6fd78a2c5",
+      "name": "Groq Chat Model1"
+    },
+    {
+      "parameters": {
+        "descriptionType": "manual",
+        "toolDescription": "Use this tool to send confirmation emails.\n\nAfter retrieving the department's email address from Google Sheets,\nsend a professional confirmation email containing the meeting information.\n\nOnly send emails to addresses retrieved from Google Sheets.\n\nDo not claim an email was sent unless the operation succeeds.",
+        "sendTo": "={{ $fromAI('To', 'Email address of the department, taken from the Google Sheet', 'string') }}",
+        "subject": "={{ $fromAI('Subject', 'Meeting email subject line', 'string') }}",
+        "message": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('Message', ``, 'string') }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.gmailTool",
+      "typeVersion": 2.2,
+      "position": [
+        1152,
+        240
+      ],
+      "id": "af35caa1-ec2a-42b1-ab53-fffd8aa4f6a6",
+      "name": "Send a message in Gmail"
+    },
+    {
+      "parameters": {
+        "descriptionType": "manual",
+        "toolDescription": "Use this tool to search the department database.\n\nThe Google Sheet contains two columns:\n- Department\n- Email\n\nSearch for the department mentioned in the meeting information.\nRetrieve its corresponding email address.\n\nAlways use this tool when you need to identify a department's email.\nNever invent or assume email addresses.",
+        "documentId": {
+          "__rl": true,
+          "value": "YOUR_GOOGLE_SHEET_ID",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "Sheet1",
+          "mode": "name"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleSheetsTool",
+      "typeVersion": 4.7,
+      "position": [
+        1328,
+        240
+      ],
+      "id": "b06353b4-141c-493b-ad3e-d8b774f307fa",
+      "name": "Get row(s) in sheet in Google Sheets"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "When clicking ‘Execute workflow’": {
+      "main": [
+        [
+          {
+            "node": "Send message and wait for response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send message and wait for response": {
+      "main": [
+        [
+          {
+            "node": "Basic LLM Chain",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Groq Chat Model": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Basic LLM Chain",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Basic LLM Chain": {
+      "main": [
+        [
+          {
+            "node": "Code in JavaScript",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code in JavaScript": {
+      "main": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Groq Chat Model1": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send a message in Gmail": {
+      "ai_tool": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI Agent": {
+      "main": [
+        [
+          {
+            "node": "Create a task",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get row(s) in sheet in Google Sheets": {
+      "ai_tool": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  },
+  "meta": {},
+  "nodeGroups": [],
+  "tags": []
+}
